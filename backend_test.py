@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import uuid
 
 # Configuration
-BASE_URL = "https://14aab47c-f180-4ff3-98eb-1a927dd4ebc4.preview.emergentagent.com/api"
+BASE_URL = "http://localhost:3000/api"
 
 class BackendTester:
     def __init__(self):
