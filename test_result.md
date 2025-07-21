@@ -234,10 +234,10 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Authentication system (login/signup)"
-    - "Employee management API"  
-    - "Attendance tracking API"
-    - "MongoDB integration"
+    - "Beautiful landing page with office scenery"
+    - "Calendar-style attendance interface"
+    - "Authentication UI (login/signup)"
+    - "HR Dashboard"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
