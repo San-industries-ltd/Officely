@@ -1,104 +1,332 @@
 import { MongoClient } from 'mongodb'
-import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
+import { v4 as uuidv4 } from 'uuid'
 
-// MongoDB connection
-let client
-let db
+let client = null
+let db = null
 
-async function connectToMongo() {
-  if (!client) {
+// Initialize MongoDB connection
+async function connectToDatabase() {
+  if (db) return db
+  
+  try {
     client = new MongoClient(process.env.MONGO_URL)
     await client.connect()
-    db = client.db(process.env.DB_NAME)
+    db = client.db(process.env.DB_NAME || 'office_attendance')
+    console.log('Connected to MongoDB')
+    return db
+  } catch (error) {
+    console.error('MongoDB connection error:', error)
+    throw error
   }
-  return db
 }
 
-// Helper function to handle CORS
-function handleCORS(response) {
-  response.headers.set('Access-Control-Allow-Origin', '*')
-  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-  response.headers.set('Access-Control-Allow-Credentials', 'true')
-  return response
-}
-
-// OPTIONS handler for CORS
-export async function OPTIONS() {
-  return handleCORS(new NextResponse(null, { status: 200 }))
-}
-
-// Route handler function
-async function handleRoute(request, { params }) {
-  const { path = [] } = params
-  const route = `/${path.join('/')}`
-  const method = request.method
-
-  try {
-    const db = await connectToMongo()
-
-    // Root endpoint - GET /api/root (since /api/ is not accessible with catch-all)
-    if (route === '/root' && method === 'GET') {
-      return handleCORS(NextResponse.json({ message: "Hello World" }))
-    }
-    // Root endpoint - GET /api/root (since /api/ is not accessible with catch-all)
-    if (route === '/' && method === 'GET') {
-      return handleCORS(NextResponse.json({ message: "Hello World" }))
-    }
-
-    // Status endpoints - POST /api/status
-    if (route === '/status' && method === 'POST') {
-      const body = await request.json()
-      
-      if (!body.client_name) {
-        return handleCORS(NextResponse.json(
-          { error: "client_name is required" }, 
-          { status: 400 }
-        ))
-      }
-
-      const statusObj = {
+// Initialize collections with sample data
+async function initializeCollections() {
+  const database = await connectToDatabase()
+  
+  // Initialize employees collection
+  const employeesCollection = database.collection('employees')
+  const employeesCount = await employeesCollection.countDocuments()
+  
+  if (employeesCount === 0) {
+    const sampleEmployees = [
+      {
         id: uuidv4(),
-        client_name: body.client_name,
-        timestamp: new Date()
+        name: 'John Doe',
+        email: 'john@company.com',
+        password: 'password123',
+        role: 'employee',
+        location: 'Chennai',
+        createdAt: new Date()
+      },
+      {
+        id: uuidv4(),
+        name: 'Sarah Smith',
+        email: 'sarah@company.com',
+        password: 'password123',
+        role: 'employee',
+        location: 'Mumbai',
+        createdAt: new Date()
+      },
+      {
+        id: uuidv4(),
+        name: 'HR Manager',
+        email: 'hr@company.com',
+        password: 'admin123',
+        role: 'hr',
+        location: 'Bangalore',
+        createdAt: new Date()
       }
+    ]
+    
+    await employeesCollection.insertMany(sampleEmployees)
+    console.log('Sample employees created')
+  }
+  
+  // Initialize attendance collection
+  const attendanceCollection = database.collection('attendance')
+  const attendanceCount = await attendanceCollection.countDocuments()
+  
+  if (attendanceCount === 0) {
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(today.getDate() + 1)
+    
+    const employees = await employeesCollection.find().toArray()
+    const sampleAttendance = [
+      {
+        id: uuidv4(),
+        userId: employees[0]?.id,
+        date: today.toISOString().split('T')[0],
+        location: 'Chennai',
+        type: 'planned',
+        status: 'confirmed',
+        createdAt: new Date()
+      },
+      {
+        id: uuidv4(),
+        userId: employees[1]?.id,
+        date: today.toISOString().split('T')[0],
+        location: 'Mumbai',
+        type: 'planned',
+        status: 'pending',
+        createdAt: new Date()
+      }
+    ]
+    
+    await attendanceCollection.insertMany(sampleAttendance)
+    console.log('Sample attendance created')
+  }
+}
 
-      await db.collection('status_checks').insertOne(statusObj)
-      return handleCORS(NextResponse.json(statusObj))
+export async function GET(request, { params }) {
+  const path = params?.path?.join('/') || ''
+  
+  try {
+    await initializeCollections()
+    const database = await connectToDatabase()
+    
+    if (path === '' || path === 'health') {
+      return NextResponse.json({ 
+        message: 'Office Attendance API is running!',
+        timestamp: new Date().toISOString(),
+        endpoints: [
+          '/api/employees',
+          '/api/attendance',
+          '/api/auth/login',
+          '/api/auth/signup'
+        ]
+      })
     }
-
-    // Status endpoints - GET /api/status
-    if (route === '/status' && method === 'GET') {
-      const statusChecks = await db.collection('status_checks')
-        .find({})
-        .limit(1000)
-        .toArray()
-
-      // Remove MongoDB's _id field from response
-      const cleanedStatusChecks = statusChecks.map(({ _id, ...rest }) => rest)
-      
-      return handleCORS(NextResponse.json(cleanedStatusChecks))
+    
+    if (path === 'employees') {
+      const employees = await database.collection('employees').find({}, {
+        projection: { password: 0 } // Don't return passwords
+      }).toArray()
+      return NextResponse.json(employees)
     }
-
-    // Route not found
-    return handleCORS(NextResponse.json(
-      { error: `Route ${route} not found` }, 
-      { status: 404 }
-    ))
-
+    
+    if (path === 'attendance') {
+      const attendance = await database.collection('attendance').find().toArray()
+      return NextResponse.json(attendance)
+    }
+    
+    if (path.startsWith('attendance/user/')) {
+      const userId = path.split('/')[2]
+      const attendance = await database.collection('attendance').find({ userId }).toArray()
+      return NextResponse.json(attendance)
+    }
+    
+    return NextResponse.json({ error: 'Endpoint not found' }, { status: 404 })
+    
   } catch (error) {
     console.error('API Error:', error)
-    return handleCORS(NextResponse.json(
-      { error: "Internal server error" }, 
-      { status: 500 }
-    ))
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
-// Export all HTTP methods
-export const GET = handleRoute
-export const POST = handleRoute
-export const PUT = handleRoute
-export const DELETE = handleRoute
-export const PATCH = handleRoute
+export async function POST(request, { params }) {
+  const path = params?.path?.join('/') || ''
+  
+  try {
+    const body = await request.json()
+    const database = await connectToDatabase()
+    
+    if (path === 'auth/login') {
+      const { email, password } = body
+      const user = await database.collection('employees').findOne({ 
+        email, 
+        password // In production, use proper password hashing
+      }, {
+        projection: { password: 0 }
+      })
+      
+      if (user) {
+        return NextResponse.json(user)
+      } else {
+        return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+      }
+    }
+    
+    if (path === 'auth/signup') {
+      const { name, email, password, role } = body
+      
+      // Check if user already exists
+      const existingUser = await database.collection('employees').findOne({ email })
+      if (existingUser) {
+        return NextResponse.json({ error: 'User already exists' }, { status: 400 })
+      }
+      
+      const newUser = {
+        id: uuidv4(),
+        name,
+        email,
+        password, // In production, hash this password
+        role: role || 'employee',
+        location: null,
+        createdAt: new Date()
+      }
+      
+      await database.collection('employees').insertOne(newUser)
+      
+      // Return user without password
+      const { password: _, ...userWithoutPassword } = newUser
+      return NextResponse.json(userWithoutPassword)
+    }
+    
+    if (path === 'attendance/join') {
+      const { userId, date, location, type } = body
+      
+      // Check if user already has attendance for this date and location
+      const existingAttendance = await database.collection('attendance').findOne({
+        userId,
+        date,
+        location
+      })
+      
+      if (existingAttendance) {
+        return NextResponse.json({ error: 'Already marked for this date and location' }, { status: 400 })
+      }
+      
+      const attendance = {
+        id: uuidv4(),
+        userId,
+        date,
+        location,
+        type: type || 'planned',
+        status: 'pending',
+        createdAt: new Date()
+      }
+      
+      await database.collection('attendance').insertOne(attendance)
+      return NextResponse.json(attendance)
+    }
+    
+    if (path === 'attendance/confirm') {
+      const { attendanceId, status } = body
+      
+      const result = await database.collection('attendance').updateOne(
+        { id: attendanceId },
+        { 
+          $set: { 
+            status,
+            confirmedAt: new Date()
+          }
+        }
+      )
+      
+      if (result.matchedCount === 0) {
+        return NextResponse.json({ error: 'Attendance record not found' }, { status: 404 })
+      }
+      
+      return NextResponse.json({ message: 'Attendance updated successfully' })
+    }
+    
+    return NextResponse.json({ error: 'Endpoint not found' }, { status: 404 })
+    
+  } catch (error) {
+    console.error('API Error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+export async function PUT(request, { params }) {
+  const path = params?.path?.join('/') || ''
+  
+  try {
+    const body = await request.json()
+    const database = await connectToDatabase()
+    
+    if (path.startsWith('employees/')) {
+      const userId = path.split('/')[1]
+      const { name, email, role, location } = body
+      
+      const result = await database.collection('employees').updateOne(
+        { id: userId },
+        { 
+          $set: { 
+            name,
+            email,
+            role,
+            location,
+            updatedAt: new Date()
+          }
+        }
+      )
+      
+      if (result.matchedCount === 0) {
+        return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      }
+      
+      return NextResponse.json({ message: 'User updated successfully' })
+    }
+    
+    return NextResponse.json({ error: 'Endpoint not found' }, { status: 404 })
+    
+  } catch (error) {
+    console.error('API Error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+export async function DELETE(request, { params }) {
+  const path = params?.path?.join('/') || ''
+  
+  try {
+    const database = await connectToDatabase()
+    
+    if (path.startsWith('employees/')) {
+      const userId = path.split('/')[1]
+      
+      const result = await database.collection('employees').deleteOne({ id: userId })
+      
+      if (result.deletedCount === 0) {
+        return NextResponse.json({ error: 'User not found' }, { status: 404 })
+      }
+      
+      // Also delete associated attendance records
+      await database.collection('attendance').deleteMany({ userId })
+      
+      return NextResponse.json({ message: 'User deleted successfully' })
+    }
+    
+    if (path.startsWith('attendance/')) {
+      const attendanceId = path.split('/')[1]
+      
+      const result = await database.collection('attendance').deleteOne({ id: attendanceId })
+      
+      if (result.deletedCount === 0) {
+        return NextResponse.json({ error: 'Attendance record not found' }, { status: 404 })
+      }
+      
+      return NextResponse.json({ message: 'Attendance record deleted successfully' })
+    }
+    
+    return NextResponse.json({ error: 'Endpoint not found' }, { status: 404 })
+    
+  } catch (error) {
+    console.error('API Error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
