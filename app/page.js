@@ -27,6 +27,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('app') // 'app' or 'dashboard'
   const [selectedUser, setSelectedUser] = useState(null)
   const [profileForm, setProfileForm] = useState({ name: '', bio: '', avatar: '', banner: '' })
+  const [currentWeek, setCurrentWeek] = useState(1) // Week navigation (1-5)
 
   // Mock data initialization
   useEffect(() => {
